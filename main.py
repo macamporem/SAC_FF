@@ -136,7 +136,8 @@ for i_episode in itertools.count(1):
         mask = 1 if episode_steps == env._max_episode_steps else float(not done)
 
         if args.rnoise > 0:
-            reward *= (1 + np.random.normal(0, args.rnoise))
+#            reward *= (1 + np.random.normal(0, args.rnoise))
+            reward += np.random.normal(0, args.rnoise)
 
         memory.push(state, action, reward, next_state, mask) # Append transition to memory
 

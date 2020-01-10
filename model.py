@@ -97,8 +97,8 @@ class QNetwork(nn.Module):
                 tempQvalue = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                                                                              self.action_bias + action_m1p1*self.action_scale], 1))))))
 
-                spectrogram_sin[i].append( (1/gsize) * tempQvalue * torch.sin(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
-                spectrogram_cos[i].append( (1/gsize) * tempQvalue * torch.cos(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                spectrogram_sin[i].append( (1/gsize) * tempQvalue * torch.sin(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                spectrogram_cos[i].append( (1/gsize) * tempQvalue * torch.cos(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
 
                 for uidx in range(gsize):
                     
@@ -106,8 +106,8 @@ class QNetwork(nn.Module):
                     action_m1p1[:,i] = agrid
                     tempQvalue = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                                                                                  self.action_bias + action_m1p1*self.action_scale], 1))))))
-                    spectrogram_sin[i][k] += ( (1/gsize) * tempQvalue * torch.sin(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
-                    spectrogram_cos[i][k] += ( (1/gsize) * tempQvalue * torch.cos(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                    spectrogram_sin[i][k] += ( (1/gsize) * tempQvalue * torch.sin(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                    spectrogram_cos[i][k] += ( (1/gsize) * tempQvalue * torch.cos(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
 
                 spectrogram_sin[i][k] = torch.pow(spectrogram_sin[i][k],2)
                 spectrogram_cos[i][k] = torch.pow(spectrogram_cos[i][k],2)
@@ -136,7 +136,7 @@ class QNetwork(nn.Module):
         if True:
             
             t = np.arange(0, modes, 1)
-            splot = [np.array(spectrogram[i]) for i in range(self_num_actions)]
+            splot = [np.array(np.log(spectrogram[i])) for i in range(self_num_actions)]
             
             ax1 = plt.subplot(311)
             plt.plot(t, splot[0])
@@ -330,8 +330,8 @@ class Qfourier(nn.Module):
                     tempQvalue = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                                                                                  self.action_bias + action_m1p1*self.action_scale], 1))))))
                         
-                    spectrogram_sin[i].append( (1/gsize) * tempQvalue * torch.sin(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
-                    spectrogram_cos[i].append( (1/gsize) * tempQvalue * torch.cos(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                    spectrogram_sin[i].append( (1/gsize) * tempQvalue * torch.sin(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                    spectrogram_cos[i].append( (1/gsize) * tempQvalue * torch.cos(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
                                                                                                  
                     for uidx in range(gsize):
                         
@@ -340,8 +340,8 @@ class Qfourier(nn.Module):
                         tempQvalue = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                                                                                      self.action_bias + action_m1p1*self.action_scale],
                                                                                                     1))))))
-                        spectrogram_sin[i][k] += ( (1/gsize) * tempQvalue * torch.sin(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
-                        spectrogram_cos[i][k] += ( (1/gsize) * tempQvalue * torch.cos(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                        spectrogram_sin[i][k] += ( (1/gsize) * tempQvalue * torch.sin(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                        spectrogram_cos[i][k] += ( (1/gsize) * tempQvalue * torch.cos(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
 
                     spectrogram_sin[i][k] = torch.pow(spectrogram_sin[i][k],2)
                     spectrogram_cos[i][k] = torch.pow(spectrogram_cos[i][k],2)
@@ -369,7 +369,7 @@ class Qfourier(nn.Module):
         if True:
         
             t = np.arange(0, modes, 1)
-            splot = [np.array(spectrogram[i]) for i in range(self_num_actions)]
+            splot = [np.array(np.log(spectrogram[i])) for i in range(self_num_actions)]
         
             ax1 = plt.subplot(311)
             plt.plot(t, splot[0])
