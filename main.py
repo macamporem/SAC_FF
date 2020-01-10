@@ -79,14 +79,17 @@ else:
 if False:
     print('\n\n\n LOADING MODEL')
     agent.load_model(
-                     actor_path = "models/sac_actor_{}_{}".format('miguelca_test01', args.Qapproximation),
-                     critic_path = "models/sac_critic_{}_{}".format('miguelca_test01', args.Qapproximation)
+                     actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
+                        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps)),
+                     critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
+                        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps))
                      )
     hard_update(agent.critic_target, agent.critic)
 
 #TesnorboardX
-writer = SummaryWriter(logdir='runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
-                                                             args.policy, "autotune" if args.automatic_entropy_tuning else ""))
+writer = SummaryWriter(logdir='./runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
+    args.env_name,
+    args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
 # Memory
 memory = ReplayMemory(args.replay_size)
@@ -187,7 +190,11 @@ for i_episode in itertools.count(1):
         print("----------------------------------------")
 
         if avg_reward > best_eval_avg_reward:
-            agent.save_model(env_name = 'miguelca_test01', suffix = args.Qapproximation)
+            agent.save_model(
+                env_name = 'miguelca_test01', 
+                suffix = "{}_{}_{}_{}_{}".format(
+                    args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise).replace('.','_'),str(args.num_steps))
+                )
             best_eval_avg_reward = avg_reward
 
 # final eval
@@ -218,7 +225,11 @@ print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)
 print("----------------------------------------")
 
 if avg_reward > best_eval_avg_reward:
-    agent.save_model(env_name = 'miguelca_test01', suffix = args.Qapproximation)
+    agent.save_model(
+        env_name = 'miguelca_test01', 
+        suffix = "{}_{}_{}_{}_{}".format(
+            args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise).replace('.','_'),str(args.num_steps))
+    )
     best_eval_avg_reward = avg_reward
 
 env.close()

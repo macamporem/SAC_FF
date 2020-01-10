@@ -17,8 +17,14 @@ import roboschool # MACR
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
 parser.add_argument('--Qapproximation', default="baseline",
                     help='baseline, fourier, byactiondim')
-parser.add_argument('--fouriermodes', type=int, default=30, metavar='N',
-                    help='N of fourier modes (default: 30)')
+parser.add_argument('--filter', default="none",
+                    help='Q filter for policy optimization: none, rec_inside, rec_outside')
+parser.add_argument('--TDfilter', default="none",
+                    help='Q filter for TD step: none, rec_inside, rec_outside')
+parser.add_argument('--rnoise', type=float, default=0., metavar='G',
+                    help='std of rewards multiplicative noise term (default = 0)')
+parser.add_argument('--fouriermodes', type=int, default=10, metavar='N',
+                    help='N of fourier modes (default: 10)')
 parser.add_argument('--batches', type=int, default=10, metavar='N',
                     help='N of batches (default: 10)')
 parser.add_argument('--To', type=int, default=2, metavar='N',
@@ -75,13 +81,15 @@ else:
     agent = SAC_fourier(env.observation_space.shape[0], env.action_space, args)
 
 agent.load_model(
-                 actor_path = "models/sac_actor_{}_{}".format('miguelca_test01', args.Qapproximation),
-                 critic_path = "models/sac_critic_{}_{}".format('miguelca_test01', args.Qapproximation)
-                 )
+    actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}".format('miguelca_test01',
+        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps)),
+    critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}".format('miguelca_test01',
+        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps))
+    )
 hard_update(agent.critic_target, agent.critic)
 
 #TesnorboardX
-writer = SummaryWriter(logdir='runs/{}_SAC_eval_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
+writer = SummaryWriter(logdir='./runs/{}_SAC_eval_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
                                                              args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
 # Training Loop

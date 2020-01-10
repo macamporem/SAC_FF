@@ -3,7 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 import numpy as np
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('TkAgg')
 
 LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
