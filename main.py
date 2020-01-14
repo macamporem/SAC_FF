@@ -20,6 +20,8 @@ parser.add_argument('--filter', default="none",
                     help='Q filter for policy optimization: none, rec_inside, rec_outside')
 parser.add_argument('--TDfilter', default="none",
                     help='Q filter for TD step: none, rec_inside, rec_outside')
+parser.add_argument('--noise', default="none",
+                    help='none, twgn, swgn')
 parser.add_argument('--rnoise', type=float, default=0., metavar='G',
                     help='std of rewards multiplicative noise term (default = 0)')
 parser.add_argument('--env-name', default="HalfCheetah-v2",
@@ -79,10 +81,10 @@ else:
 if False:
     print('\n\n\n LOADING MODEL')
     agent.load_model(
-                     actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps)),
-                     critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps))
+                     actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
+                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise),str(args.num_steps)),
+                     critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
+                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise),str(args.num_steps))
                      )
     hard_update(agent.critic_target, agent.critic)
 
@@ -98,8 +100,27 @@ memory = ReplayMemory(args.replay_size)
 total_numsteps = 0
 updates = 0
 
+# prep swgn noise?
+if args.noise == 'swgn':
+    swgn = list([])
+    swgn.append( (1/np.sqrt(3)) * np.random.normal(0, args.rnoise, size=201) )
+    swgn.append( (1/np.sqrt(3)) * np.random.normal(0, args.rnoise, size=201) )
+    swgn.append( (1/np.sqrt(3)) * np.random.normal(0, args.rnoise, size=201) )
+
+if args.noise == 'awgn':
+    awgn_baseline = list([])
+    awgn_baseline.append(.20)
+    awgn_baseline.append(.30)
+    awgn_baseline.append(.60)
+
 best_eval_avg_reward = 0
 for i_episode in itertools.count(1):
+
+    if args.noise == 'awgn':
+        awgn = list([])
+        for aidx in range(env.action_space.shape[0]):
+            awgn.append( np.random.normal(0, args.rnoise, size=201) )
+
     episode_reward = 0
     episode_steps = 0
     episode_std = 0
@@ -129,7 +150,13 @@ for i_episode in itertools.count(1):
                 writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                 updates += 1
 
-        next_state, reward, done, _ = env.step(action) # Step
+        if args.noise == 'awgn':
+            action_w_noise = action
+            for aidx in range(env.action_space.shape[0]):
+                action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+            next_state, reward, done, _ = env.step(action_w_noise) # Step
+        else:
+            next_state, reward, done, _ = env.step(action) # Step
         episode_steps += 1
         total_numsteps += 1
         episode_reward += reward
@@ -139,9 +166,10 @@ for i_episode in itertools.count(1):
         mask = 1 if episode_steps == env._max_episode_steps else float(not done)
 
         if args.rnoise > 0:
-#            reward *= (1 + np.random.normal(0, args.rnoise))
-            reward += np.random.normal(0, args.rnoise)
-
+            if args.noise == 'twgn':
+                reward += np.random.normal(0, args.rnoise)
+            if args.noise == 'swgn':
+                reward += sum([swgn[i][int(100+100*action[i])] for i in range(3)])
         memory.push(state, action, reward, next_state, mask) # Append transition to memory
 
         state = next_state
@@ -167,14 +195,26 @@ for i_episode in itertools.count(1):
         avg_reward = 0.
         episodes = 10
         for _  in range(episodes):
+            
+            if args.noise == 'awgn':
+                awgn = list([])
+                for aidx in range(env.action_space.shape[0]):
+                    awgn.append( np.random.normal(0, args.rnoise, size=201) )
+
             state = env.reset()
             episode_reward = 0
             done = False
             while not done:
                 action = agent.select_action(state, eval=True)
 
-                next_state, reward, done, _ = env.step(action)
-                
+                if args.noise == 'awgn':
+                    action_w_noise = action
+                    for aidx in range(env.action_space.shape[0]):
+                        action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                    next_state, reward, done, _ = env.step(action_w_noise) # Step
+                else:
+                    next_state, reward, done, _ = env.step(action) # Step
+
                 episode_reward += reward
 
                 # still_open = env.render("human") # MACR
@@ -185,15 +225,15 @@ for i_episode in itertools.count(1):
 
         writer.add_scalar('avg_reward/test', avg_reward, i_episode)
 
-        print("----------------------------------------")
-        print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
-        print("----------------------------------------")
+        print("--------------------------------------------------")
+        print("Test Episodes: {}, Avg. Reward: {}, Max. Reward {}".format(episodes, round(avg_reward, 2), round(best_eval_avg_reward,2) ))
+        print("--------------------------------------------------")
 
         if avg_reward > best_eval_avg_reward:
             agent.save_model(
                 env_name = 'miguelca_test01', 
-                suffix = "{}_{}_{}_{}_{}".format(
-                    args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise).replace('.','_'),str(args.num_steps))
+                suffix = "{}_{}_{}_{}_{}_{}".format(
+                    args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
                 )
             best_eval_avg_reward = avg_reward
 
@@ -202,13 +242,25 @@ for i_episode in itertools.count(1):
 avg_reward = 0.
 episodes = 10
 for _  in range(episodes):
+    
+    if args.noise == 'awgn':
+        awgn = list([])
+        for aidx in range(env.action_space.shape[0]):
+            awgn.append( np.random.normal(0, args.rnoise, size=201) )
+
     state = env.reset()
     episode_reward = 0
     done = False
     while not done:
         action = agent.select_action(state, eval=True)
-                
-        next_state, reward, done, _ = env.step(action)
+
+        if args.noise == 'awgn':
+            action_w_noise = action
+            for aidx in range(env.action_space.shape[0]):
+                action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+            next_state, reward, done, _ = env.step(action_w_noise) # Step
+        else:
+            next_state, reward, done, _ = env.step(action) # Step
         
         episode_reward += reward
                 
@@ -220,15 +272,15 @@ avg_reward /= episodes
         
 writer.add_scalar('avg_reward/test', avg_reward, i_episode)
         
-print("----------------------------------------")
-print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
-print("----------------------------------------")
+print("--------------------------------------------------")
+print("Test Episodes: {}, Avg. Reward: {}, Max. Reward {}".format(episodes, round(avg_reward, 2), round(best_eval_avg_reward,2) ))
+print("--------------------------------------------------")
 
 if avg_reward > best_eval_avg_reward:
     agent.save_model(
         env_name = 'miguelca_test01', 
-        suffix = "{}_{}_{}_{}_{}".format(
-            args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise).replace('.','_'),str(args.num_steps))
+        suffix = "{}_{}_{}_{}_{}_{}".format(
+            args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
     )
     best_eval_avg_reward = avg_reward
 

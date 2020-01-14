@@ -21,6 +21,8 @@ parser.add_argument('--filter', default="none",
                     help='Q filter for policy optimization: none, rec_inside, rec_outside')
 parser.add_argument('--TDfilter', default="none",
                     help='Q filter for TD step: none, rec_inside, rec_outside')
+parser.add_argument('--noise', default="none",
+                    help='none, twgn, swgn')
 parser.add_argument('--rnoise', type=float, default=0., metavar='G',
                     help='std of rewards multiplicative noise term (default = 0)')
 parser.add_argument('--fouriermodes', type=int, default=10, metavar='N',
@@ -81,10 +83,10 @@ else:
     agent = SAC_fourier(env.observation_space.shape[0], env.action_space, args)
 
 agent.load_model(
-    actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}".format('miguelca_test01',
-        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps)),
-    critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}".format('miguelca_test01',
-        args.Qapproximation,args.filter,args.TDfilter,str(args.rnoise),str(args.num_steps))
+    actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01',
+        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps)),
+    critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01',
+        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
     )
 hard_update(agent.critic_target, agent.critic)
 
@@ -95,8 +97,16 @@ writer = SummaryWriter(logdir='./runs/{}_SAC_eval_{}_{}_{}'.format(datetime.date
 # Training Loop
 total_numsteps = 0
 updates = 0
+action_history = list([])
+action_history_w_noise = list([])
 
-for i_episode in range(3):
+if args.noise == 'awgn':
+    awgn_baseline = list([])
+    awgn_baseline.append(.20)
+    awgn_baseline.append(.30)
+    awgn_baseline.append(.60)
+
+for i_episode in range(5):
     episode_reward = 0
     episode_steps = 0
     episode_std = 0
@@ -109,13 +119,28 @@ for i_episode in range(3):
         avg_reward = 0.
         episodes = 10
         for _  in range(episodes):
+
+            if args.noise == 'awgn':
+                awgn = list([])
+                for aidx in range(env.action_space.shape[0]):
+                    awgn.append( np.random.normal(0, args.rnoise, size=201) )
+
+
             state = env.reset()
             episode_reward = 0
             done = False
             while not done:
                 action = agent.select_action(state, eval=True)
+                action_history.append(action)
+                if args.noise == 'awgn':
+                    action_w_noise = action
+                    for aidx in range(env.action_space.shape[0]):
+                        action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                    next_state, reward, done, _ = env.step(action_w_noise) # Step
+                else:
+                    next_state, reward, done, _ = env.step(action) # Step
+                action_history_w_noise.append(action)
 
-                next_state, reward, done, _ = env.step(action)
                 episode_reward += reward
 
                 # still_open = env.render("human") # MACR
@@ -127,9 +152,18 @@ for i_episode in range(3):
 
         writer.add_scalar('avg_reward/test', avg_reward, i_episode)
 
-        print("----------------------------------------")
-        print("Test Episodes: {}, Avg. Reward: {}".format(episodes, round(avg_reward, 2)))
-        print("----------------------------------------")
+        print("------------------------------------------------------------------------------------------------------------------------")
+        print("Test Episodes: {}, Avg. Reward: {:6.1f}, a1: {:5.2f},{:5.2f}, a2: {:5.2f},{:5.2f}, a3: {:5.2f},{:5.2f}".format(
+            episodes, 
+            round(avg_reward, 2),
+            np.mean(np.array(action_history),0)[0],
+            np.std(np.array(action_history),0)[0],
+            np.mean(np.array(action_history),0)[1],
+            np.std(np.array(action_history),0)[1],
+            np.mean(np.array(action_history),0)[2],
+            np.std(np.array(action_history),0)[2],
+            ))
+        print("------------------------------------------------------------------------------------------------------------------------")
 
 # Q specrum
 total_numsteps = 0
