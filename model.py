@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributions import Normal
 import numpy as np
-import matplotlib.pyplot as plt
-#import matplotlib
-#matplotlib.use('TkAgg')
+# import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('TkAgg')
 
 LOG_SIG_MAX = 2
 LOG_SIG_MIN = -20
@@ -167,6 +167,8 @@ class Qfourier(nn.Module):
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, 1)
         
+        self.filterbw_0p1 = nn.Linear(num_inputs, 3) # torch.sigmoid(nn.Parameter(torch.tensor(1.)))
+
         self.apply(weights_init_)
         self.gsize = gridsize
         self.num_actions = num_actions
@@ -180,9 +182,11 @@ class Qfourier(nn.Module):
             self.action_bias = torch.FloatTensor((action_space.high + action_space.low) / 2.)
 
                 
-        self.integration_grid = [round(i*2*.75/4-.75,2) for i in range(4+1)]
+        self.integration_grid = [round(i*2*.75/4-.75,2) for i in range(4+1)] # ..0001
+        # self.integration_grid = [round(i*2*1.95/10-1.95,2) for i in range(10+1)] # ..0002
         print('\nintegration grid')
         print(self.integration_grid)
+
 
     def forward(self, state, action, std = None, logprob = None, mu = None, filter = 'none'):
 
@@ -203,16 +207,6 @@ class Qfourier(nn.Module):
             x1 = self.linear3(x1)
 
             action_m1p1 = (action - self.action_bias) / self.action_scale
-
-            # mu has gradient
-            # 0.1       no         denominator             -> 800, 0.40...130, 0.30...600, 0.30...
-            # 1.0       no         denominator             -> 120, 0.06... 90, 0.06
-            # 1.0       no         denominator   alpha 2.0 ->  30, 0.30
-            # 1.0      std*sum exp denominator   alpha 1.0 ->  30, 0.20
-            # 1.0      std*sum exp denominator   alpha 0.1 -> 120, 0.04
-            # 1.0          sum exp denominator   alpha 0.5 -> 120, 0.20
-            # mu no gradient
-            # 1.0          sum exp denominator   alpha 0.5 -> 415, 0.30 ?? rogue result, couldnt replicate
 
             # argument of sin function
             cutoffW = 1 * (1 / (F.relu(std) + 0.1))
@@ -242,7 +236,9 @@ class Qfourier(nn.Module):
             filterpower = torch.zeros((state.shape[0],1))
             Qpower = torch.zeros((state.shape[0],1))
 
-            cutoffW = 2 * (1 / (F.relu(std) + 0.1))
+            # cutoffW = 2 * (1 / (F.relu(std) + 0.1)) # ..0001 and ..0002
+            bw = torch.sigmoid(self.filterbw_0p1(state)) # ..0010
+            cutoffW = bw * 3 * (1 / (F.relu(std) + 0.1)) # ..0010 and ..0011
             delta_a = 3.14 / cutoffW # first zero of sincWx/pix
             
             # cutoffW = 1 ... [-0.1,0,0.1] ... main.py --Qapproximation fourier --num_steps 100000 --TDfilter rec_inside --alpha 0.05 ~ 1100
@@ -332,8 +328,8 @@ class Qfourier(nn.Module):
                     tempQvalue = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                                                                                  self.action_bias + action_m1p1*self.action_scale], 1))))))
                         
-                    spectrogram_sin[i].append( (1/gsize) * tempQvalue * torch.sin(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
-                    spectrogram_cos[i].append( (1/gsize) * tempQvalue * torch.cos(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                    spectrogram_sin[i].append( (1/gsize) * tempQvalue * torch.sin(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                    spectrogram_cos[i].append( (1/gsize) * tempQvalue * torch.cos(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
                                                                                                  
                     for uidx in range(gsize):
                         
@@ -342,8 +338,8 @@ class Qfourier(nn.Module):
                         tempQvalue = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                                                                                      self.action_bias + action_m1p1*self.action_scale],
                                                                                                     1))))))
-                        spectrogram_sin[i][k] += ( (1/gsize) * tempQvalue * torch.sin(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
-                        spectrogram_cos[i][k] += ( (1/gsize) * tempQvalue * torch.cos(((k)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                        spectrogram_sin[i][k] += ( (1/gsize) * tempQvalue * torch.sin(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
+                        spectrogram_cos[i][k] += ( (1/gsize) * tempQvalue * torch.cos(((k+1)*2*3.14/To)*action_m1p1[:,i].view(-1,1)) )
 
                     spectrogram_sin[i][k] = torch.pow(spectrogram_sin[i][k],2)
                     spectrogram_cos[i][k] = torch.pow(spectrogram_cos[i][k],2)

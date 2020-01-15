@@ -14,8 +14,6 @@ from utils import soft_update, hard_update
 import roboschool # MACR
 
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
-parser.add_argument('--continuetraining', default="no",
-                    help='load file and continue: yes/no')
 parser.add_argument('--Qapproximation', default="baseline",
                     help='baseline, fourier, byactiondim')
 parser.add_argument('--filter', default="none",
@@ -80,60 +78,15 @@ else:
     agent = SAC_fourier(env.observation_space.shape[0], env.action_space, args)
     print('\nusing {}\n'.format(args.Qapproximation))
 
-if args.continuetraining == 'yes':
-    print('\n\n\nLOADING MODEL\n\n\n')
-
+if False:
+    print('\n\n\n LOADING MODEL')
     agent.load_model(
                      actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps)),
+                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise),str(args.num_steps)),
                      critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
+                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise),str(args.num_steps))
                      )
     hard_update(agent.critic_target, agent.critic)
-
-    # test eval
-    if args.noise == 'awgn':
-        awgn_baseline = list([])
-        awgn_baseline.append(.20)
-        awgn_baseline.append(.30)
-        awgn_baseline.append(.60)
-
-    avg_reward = 0.
-    episodes = 10
-    for _  in range(episodes):
-        
-        if args.noise == 'awgn':
-            awgn = list([])
-            for aidx in range(env.action_space.shape[0]):
-                awgn.append( np.random.normal(0, args.rnoise, size=201) )
-
-        state = env.reset()
-        episode_reward = 0
-        done = False
-        while not done:
-            action = agent.select_action(state, eval=True)
-
-            if args.noise == 'awgn':
-                action_w_noise = action
-                for aidx in range(env.action_space.shape[0]):
-                    action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
-                next_state, reward, done, _ = env.step(action_w_noise) # Step
-            else:
-                next_state, reward, done, _ = env.step(action) # Step
-            
-            episode_reward += reward
-                    
-            # still_open = env.render("human") # MACR
-                    
-            state = next_state
-        avg_reward += episode_reward
-    avg_reward /= episodes
-    best_eval_avg_reward = avg_reward
-    print("--------------------------------------------------")
-    print("Loaded model, test eval")
-    print("Test Episodes: {}, Avg. Reward: {}, Max. Reward {}".format(episodes, round(avg_reward, 2), round(best_eval_avg_reward,2) ))
-    print("--------------------------------------------------")
-
 
 #TesnorboardX
 writer = SummaryWriter(logdir='./runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"),
@@ -160,8 +113,7 @@ if args.noise == 'awgn':
     awgn_baseline.append(.30)
     awgn_baseline.append(.60)
 
-if args.continuetraining == 'no':
-    best_eval_avg_reward = 0
+best_eval_avg_reward = 0
 for i_episode in itertools.count(1):
 
     if args.noise == 'awgn':
@@ -178,51 +130,50 @@ for i_episode in itertools.count(1):
 
     while not done:
 
-        if True:
-            if args.start_steps > total_numsteps:
-                action = env.action_space.sample()  # Sample random action
-            else:
-                action = agent.select_action(state)  # Sample action from policy
+        if args.start_steps > total_numsteps:
+            action = env.action_space.sample()  # Sample random action
+        else:
+            action = agent.select_action(state)  # Sample action from policy
 
-            if len(memory) > args.batch_size:
-                # Number of updates per step in environment
-                for i in range(args.updates_per_step):
-                    # Update parameters of all the networks
-                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha, \
-                        std = agent.update_parameters(memory, args.batch_size, updates)
-                    episode_std += std
-                    episode_std_count += 1
+        if len(memory) > args.batch_size:
+            # Number of updates per step in environment
+            for i in range(args.updates_per_step):
+                # Update parameters of all the networks
+                critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha, \
+                    std = agent.update_parameters(memory, args.batch_size, updates)
+                episode_std += std
+                episode_std_count += 1
 
-                    writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                    writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                    writer.add_scalar('loss/policy', policy_loss, updates)
-                    writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                    writer.add_scalar('entropy_temprature/alpha', alpha, updates)
-                    updates += 1
+                writer.add_scalar('loss/critic_1', critic_1_loss, updates)
+                writer.add_scalar('loss/critic_2', critic_2_loss, updates)
+                writer.add_scalar('loss/policy', policy_loss, updates)
+                writer.add_scalar('loss/entropy_loss', ent_loss, updates)
+                writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                updates += 1
 
-            if args.noise == 'awgn':
-                action_w_noise = action
-                for aidx in range(env.action_space.shape[0]):
-                    action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
-                next_state, reward, done, _ = env.step(action_w_noise) # Step
-            else:
-                next_state, reward, done, _ = env.step(action) # Step
-            episode_steps += 1
-            total_numsteps += 1
-            episode_reward += reward
+        if args.noise == 'awgn':
+            action_w_noise = action
+            for aidx in range(env.action_space.shape[0]):
+                action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+            next_state, reward, done, _ = env.step(action_w_noise) # Step
+        else:
+            next_state, reward, done, _ = env.step(action) # Step
+        episode_steps += 1
+        total_numsteps += 1
+        episode_reward += reward
 
-            # Ignore the "done" signal if it comes from hitting the time horizon.
-            # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
-            mask = 1 if episode_steps == env._max_episode_steps else float(not done)
+        # Ignore the "done" signal if it comes from hitting the time horizon.
+        # (https://github.com/openai/spinningup/blob/master/spinup/algos/sac/sac.py)
+        mask = 1 if episode_steps == env._max_episode_steps else float(not done)
 
-            if args.rnoise > 0:
-                if args.noise == 'twgn':
-                    reward += np.random.normal(0, args.rnoise)
-                if args.noise == 'swgn':
-                    reward += sum([swgn[i][int(100+100*action[i])] for i in range(3)])
-            memory.push(state, action, reward, next_state, mask) # Append transition to memory
+        if args.rnoise > 0:
+            if args.noise == 'twgn':
+                reward += np.random.normal(0, args.rnoise)
+            if args.noise == 'swgn':
+                reward += sum([swgn[i][int(100+100*action[i])] for i in range(3)])
+        memory.push(state, action, reward, next_state, mask) # Append transition to memory
 
-            state = next_state
+        state = next_state
 
     if total_numsteps > args.num_steps:
         break
@@ -240,7 +191,7 @@ for i_episode in itertools.count(1):
                                                                                                )
           )
 
-    if i_episode % 50 == 0 and args.eval == True:
+    if i_episode % 100 == 0 and args.eval == True:
         
         avg_reward = 0.
         episodes = 10
@@ -287,16 +238,8 @@ for i_episode in itertools.count(1):
                 )
             best_eval_avg_reward = avg_reward
 
-        if avg_reward < best_eval_avg_reward and args.continuetraining == 'yes' and i_episode < 1000:
-            agent.load_model(
-                             actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                                args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps)),
-                             critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                                args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
-                             )
-            hard_update(agent.critic_target, agent.critic)
-
 # final eval
+
 avg_reward = 0.
 episodes = 10
 for _  in range(episodes):
