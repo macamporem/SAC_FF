@@ -167,7 +167,7 @@ class Qfourier(nn.Module):
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, 1)
         
-        self.filterbw_0p1 = nn.Linear(num_inputs, 3) # torch.sigmoid(nn.Parameter(torch.tensor(1.)))
+#        self.filterbw_0p1 = nn.Linear(num_inputs, 3) # torch.sigmoid(nn.Parameter(torch.tensor(1.)))
 
         self.apply(weights_init_)
         self.gsize = gridsize
@@ -183,12 +183,13 @@ class Qfourier(nn.Module):
 
                 
         self.integration_grid = [round(i*2*.75/4-.75,2) for i in range(4+1)] # ..0001
-        # self.integration_grid = [round(i*2*1.95/10-1.95,2) for i in range(10+1)] # ..0002
+#        self.integration_grid = [round(i*2*1.95/10-1.95,2) for i in range(10+1)] # ..0002
+#        self.integration_grid = [round(i*2*.75/2-.75,2) for i in range(2+1)] # ..0003
         print('\nintegration grid')
         print(self.integration_grid)
 
 
-    def forward(self, state, action, std = None, logprob = None, mu = None, filter = 'none'):
+    def forward(self, state, action, std = None, logprob = None, mu = None, filter = 'none', cutoffXX = 2):
 
         if filter == 'none':
             xu = torch.cat([state, action], 1)
@@ -236,9 +237,9 @@ class Qfourier(nn.Module):
             filterpower = torch.zeros((state.shape[0],1))
             Qpower = torch.zeros((state.shape[0],1))
 
-            # cutoffW = 2 * (1 / (F.relu(std) + 0.1)) # ..0001 and ..0002
-            bw = torch.sigmoid(self.filterbw_0p1(state)) # ..0010
-            cutoffW = bw * 3 * (1 / (F.relu(std) + 0.1)) # ..0010 and ..0011
+            cutoffW = cutoffXX * (1 / (F.relu(std) + 0.1)) # ..0001 and ..0002
+#            bw = torch.sigmoid(self.filterbw_0p1(state)) # ..0010
+#            cutoffW = bw * 3 * (1 / (F.relu(std) + 0.1)) # ..0010 and ..0011
             delta_a = 3.14 / cutoffW # first zero of sincWx/pix
             
             # cutoffW = 1 ... [-0.1,0,0.1] ... main.py --Qapproximation fourier --num_steps 100000 --TDfilter rec_inside --alpha 0.05 ~ 1100

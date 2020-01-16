@@ -26,6 +26,9 @@ parser.add_argument('--noise', default="none",
                     help='none, twgn, swgn')
 parser.add_argument('--rnoise', type=float, default=0., metavar='G',
                     help='std of rewards multiplicative noise term (default = 0)')
+parser.add_argument('--cutoffX', type=float, default=2, metavar='G',
+                    help='filter BW in X 1/std')
+
 parser.add_argument('--env-name', default="HalfCheetah-v2",
                     help='Mujoco Gym environment (default: HalfCheetah-v2)')
 parser.add_argument('--policy', default="Gaussian",
@@ -79,60 +82,6 @@ if args.Qapproximation == 'baseline':
 else:
     agent = SAC_fourier(env.observation_space.shape[0], env.action_space, args)
     print('\nusing {}\n'.format(args.Qapproximation))
-
-if args.continuetraining == 'yes':
-    print('\n\n\nLOADING MODEL\n\n\n')
-
-    agent.load_model(
-                     actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps)),
-                     critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                        args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
-                     )
-    hard_update(agent.critic_target, agent.critic)
-
-    # test eval
-    if args.noise == 'awgn':
-        awgn_baseline = list([])
-        awgn_baseline.append(.20)
-        awgn_baseline.append(.30)
-        awgn_baseline.append(.60)
-
-    avg_reward = 0.
-    episodes = 10
-    for _  in range(episodes):
-        
-        if args.noise == 'awgn':
-            awgn = list([])
-            for aidx in range(env.action_space.shape[0]):
-                awgn.append( np.random.normal(0, args.rnoise, size=201) )
-
-        state = env.reset()
-        episode_reward = 0
-        done = False
-        while not done:
-            action = agent.select_action(state, eval=True)
-
-            if args.noise == 'awgn':
-                action_w_noise = action
-                for aidx in range(env.action_space.shape[0]):
-                    action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
-                next_state, reward, done, _ = env.step(action_w_noise) # Step
-            else:
-                next_state, reward, done, _ = env.step(action) # Step
-            
-            episode_reward += reward
-                    
-            # still_open = env.render("human") # MACR
-                    
-            state = next_state
-        avg_reward += episode_reward
-    avg_reward /= episodes
-    best_eval_avg_reward = avg_reward
-    print("--------------------------------------------------")
-    print("Loaded model, test eval")
-    print("Test Episodes: {}, Avg. Reward: {}, Max. Reward {}".format(episodes, round(avg_reward, 2), round(best_eval_avg_reward,2) ))
-    print("--------------------------------------------------")
 
 
 #TesnorboardX
@@ -240,7 +189,7 @@ for i_episode in itertools.count(1):
                                                                                                )
           )
 
-    if i_episode % 50 == 0 and args.eval == True:
+    if i_episode > 900 and i_episode % 25 == 0 and args.eval == True:
         
         avg_reward = 0.
         episodes = 10

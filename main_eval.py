@@ -142,7 +142,7 @@ for i_episode in range(5):
                 else:
                     next_state, reward, done, _ = env.step(action) # Step
                 action_history_w_noise.append(action)
-                # adaptivebw.append(torch.sigmoid(agent.critic.filterbw_0p1(torch.tensor(state))).item())
+#                adaptivebw.append(torch.sigmoid(agent.critic.filterbw_0p1(torch.tensor(state))).detach().numpy())
 
                 episode_reward += reward
 
@@ -156,7 +156,7 @@ for i_episode in range(5):
         writer.add_scalar('avg_reward/test', avg_reward, i_episode)
 
         print("------------------------------------------------------------------------------------------------------------------------")
-        print("Test Episodes: {}, Avg. Reward: {:6.1f}, a1: {:5.2f},{:5.2f}, a2: {:5.2f},{:5.2f}, a3: {:5.2f},{:5.2f}, bw : {:5.4f}".format(
+        print("Test Episodes: {}, Avg. Reward: {:6.1f}, a1: {:5.2f},{:5.2f}, a2: {:5.2f},{:5.2f}, a3: {:5.2f},{:5.2f}, bw : {:3.2f} {:3.2f} {:3.2f}".format(
             episodes, 
             round(avg_reward, 2),
             np.mean(np.array(action_history),0)[0],
@@ -165,7 +165,9 @@ for i_episode in range(5):
             np.std(np.array(action_history),0)[1],
             np.mean(np.array(action_history),0)[2],
             np.std(np.array(action_history),0)[2],
-            # np.mean(np.array(adaptivebw))
+            0, #np.mean(np.array(adaptivebw),0)[0],
+            0, #np.mean(np.array(adaptivebw),0)[1],
+            0, #np.mean(np.array(adaptivebw),0)[2],
             ))
         print("------------------------------------------------------------------------------------------------------------------------")
 

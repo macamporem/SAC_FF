@@ -29,6 +29,8 @@ class SAC_fourier(object):
         except:
             self.TDfilter = 'none'
 
+        self.cutoffX = args.cutoffX
+        
         if args.Qapproximation == 'fourier':
             self.critic = Qfourier(num_inputs,
                 action_space.shape[0],
@@ -107,12 +109,17 @@ class SAC_fourier(object):
                                          std     = std, # detached
                                          logprob = None,
                                          mu      = None,
-                                         filter  = self.TDfilter)
+                                         filter  = self.TDfilter, cutoffXX = self.cutoffX)
 
             min_qf_next_target = qf1_next_target - self.alpha * next_state_log_pi
             next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
         
-        qf1  = self.critic(state_batch, action_batch)
+        qf1  = self.critic(state_batch, action_batch) # before
+#        qf1  = self.critic(state_batch, action_batch,
+#                           std     = std, # detached
+#                           logprob = None,
+#                           mu      = None,
+#                           filter  = self.TDfilter) # this is to learn bandwidth
 
         qf1_loss = F.mse_loss(qf1, next_q_value)
 
@@ -122,9 +129,9 @@ class SAC_fourier(object):
 
         if self.Qapproximation == 'fourier':
             if self.filter == 'none':
-                with torch.no_grad():
-                    _, _, _, std = self.policy.sample(state_batch)
-                pi, log_pi, _, _ = self.policy.sample(state_batch)
+#                with torch.no_grad():
+#                    _, _, _, std = self.policy.sample(state_batch)
+                pi, log_pi, _, std = self.policy.sample(state_batch)
                 qf1_pi = self.critic(state_batch, pi,
                                      std     = None,
                                      logprob = None,
@@ -138,7 +145,7 @@ class SAC_fourier(object):
                                      std     = std, # detached
                                      logprob = None,
                                      mu      = None,
-                                     filter  = self.filter)
+                                     filter  = self.filter, cutoffXX = self.cutoffX)
             if self.filter == 'rec_outside':
                 with torch.no_grad():
                     _, _, mu, std, log_pi_ = self.policy.sample_for_spectrogram(state_batch)
@@ -147,7 +154,7 @@ class SAC_fourier(object):
                                      std     = std, # detached
                                      logprob = log_pi_, # sum of logprobs w/o tanh correction
                                      mu      = mu,
-                                     filter  = self.filter)
+                                     filter  = self.filter, cutoffXX = self.cutoffX)
 #                print(((std*torch.exp(log_pi_)).sum(1, keepdim=True)).shape,
 #                      std.mean(0),
 #                      ((std*torch.exp(log_pi_)).sum(1, keepdim=True)).mean(0),
