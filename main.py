@@ -13,6 +13,12 @@ from utils import soft_update, hard_update
 
 import roboschool # MACR
 
+import math
+
+def sigmoid(x):
+    onesm = np.ones(x.size)
+    return np.divide(onesm, (onesm + np.exp(-x)) )
+
 parser = argparse.ArgumentParser(description='PyTorch Soft Actor-Critic Args')
 parser.add_argument('--continuetraining', default="no",
                     help='load file and continue: yes/no')
@@ -89,6 +95,10 @@ writer = SummaryWriter(logdir='./runs/{}_SAC_{}_{}_{}'.format(datetime.datetime.
     args.env_name,
     args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
+# normalization constants
+action_scale = ((env.action_space.high - env.action_space.low) / 2.)
+action_bias = ((env.action_space.high + env.action_space.low) / 2.)
+
 # Memory
 memory = ReplayMemory(args.replay_size)
 
@@ -138,21 +148,37 @@ for i_episode in itertools.count(1):
                 for i in range(args.updates_per_step):
                     # Update parameters of all the networks
                     critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha, \
-                        std = agent.update_parameters(memory, args.batch_size, updates)
+                        std, filterbw0, filterbw1, filterbw2, filterpower, \
+                        min_qf_pi \
+                        = agent.update_parameters(memory, args.batch_size, updates)
                     episode_std += std
                     episode_std_count += 1
 
-                    writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                    writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                    writer.add_scalar('loss/policy', policy_loss, updates)
-                    writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                    writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                    if updates % 10 == 0:
+                        writer.add_scalar('loss/critic_1', critic_1_loss, updates/10)
+                        writer.add_scalar('loss/critic_2', critic_2_loss, updates/10)
+                        writer.add_scalar('loss/policy', policy_loss, updates/10)
+                        writer.add_scalar('loss/entropy_loss', ent_loss, updates/10)
+                        writer.add_scalar('entropy_temprature/alpha', alpha, updates/10)
+                        writer.add_scalar('filter/action0', filterbw0, updates/10)
+                        writer.add_scalar('filter/action1', filterbw1, updates/10)
+                        writer.add_scalar('filter/action2', filterbw2, updates/10)
+                        writer.add_scalar('filter/filterpower', filterpower, updates/10)
+                        writer.add_scalar('filter/Qvalue', min_qf_pi, updates/10)
                     updates += 1
 
             if args.noise == 'awgn':
-                action_w_noise = action
+                action_w_noise = (action - action_bias) / action_scale # (-1,1)
+                action_w_noise = 0.001 + (1+action_w_noise)*.499 # (0.001,0.999)
+                action_w_noise_isigmoid = np.log(action_w_noise/(1-action_w_noise)) # (-inf,inf)
                 for aidx in range(env.action_space.shape[0]):
-                    action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                    if action[aidx] == np.nan:
+                        action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*0)]
+                    else:
+                        action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                action_w_noise = sigmoid(action_w_noise_isigmoid) # (0,1)
+                action_w_noise = 1.999*(action_w_noise - 0.5) # (-1,1)
+                action_w_noise = action_w_noise * action_scale + action_bias
                 next_state, reward, done, _ = env.step(action_w_noise) # Step
             else:
                 next_state, reward, done, _ = env.step(action) # Step
@@ -189,7 +215,7 @@ for i_episode in itertools.count(1):
                                                                                                )
           )
 
-    if i_episode > 900 and i_episode % 25 == 0 and args.eval == True:
+    if i_episode > 800 and i_episode % 25 == 0 and args.eval == True:
         
         avg_reward = 0.
         episodes = 10
@@ -207,9 +233,17 @@ for i_episode in itertools.count(1):
                 action = agent.select_action(state, eval=True)
 
                 if args.noise == 'awgn':
-                    action_w_noise = action
+                    action_w_noise = (action - action_bias) / action_scale # (-1,1)
+                    action_w_noise = 0.001 + (1+action_w_noise)*.499 # (0.001,0.999)
+                    action_w_noise_isigmoid = np.log(action_w_noise/(1-action_w_noise)) # (-inf,inf)
                     for aidx in range(env.action_space.shape[0]):
-                        action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                        if action[aidx] == np.nan:
+                            action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*0)]
+                        else:
+                            action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                    action_w_noise = sigmoid(action_w_noise_isigmoid) # (0,1)
+                    action_w_noise = 1.999*(action_w_noise - 0.5) # (-1,1)
+                    action_w_noise = action_w_noise * action_scale + action_bias
                     next_state, reward, done, _ = env.step(action_w_noise) # Step
                 else:
                     next_state, reward, done, _ = env.step(action) # Step
@@ -236,15 +270,6 @@ for i_episode in itertools.count(1):
                 )
             best_eval_avg_reward = avg_reward
 
-        if avg_reward < best_eval_avg_reward and args.continuetraining == 'yes' and i_episode < 1000:
-            agent.load_model(
-                             actor_path = "./models/sac_actor_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                                args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps)),
-                             critic_path = "./models/sac_critic_{}_{}_{}_{}_{}_{}_{}".format('miguelca_test01', 
-                                args.Qapproximation,args.filter,args.TDfilter,str(args.noise),str(args.rnoise).replace('.','_'),str(args.num_steps))
-                             )
-            hard_update(agent.critic_target, agent.critic)
-
 # final eval
 avg_reward = 0.
 episodes = 10
@@ -262,10 +287,18 @@ for _  in range(episodes):
         action = agent.select_action(state, eval=True)
 
         if args.noise == 'awgn':
-            action_w_noise = action
-            for aidx in range(env.action_space.shape[0]):
-                action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
-            next_state, reward, done, _ = env.step(action_w_noise) # Step
+                action_w_noise = (action - action_bias) / action_scale # (-1,1)
+                action_w_noise = 0.001 + (1+action_w_noise)*.499 # (0.001,0.999)
+                action_w_noise_isigmoid = np.log(action_w_noise/(1-action_w_noise)) # (-inf,inf)
+                for aidx in range(env.action_space.shape[0]):
+                    if action[aidx] == np.nan:
+                        action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*0)]
+                    else:
+                        action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                action_w_noise = sigmoid(action_w_noise_isigmoid) # (0,1)
+                action_w_noise = 1.999*(action_w_noise - 0.5) # (-1,1)
+                action_w_noise = action_w_noise * action_scale + action_bias
+                next_state, reward, done, _ = env.step(action_w_noise) # Step
         else:
             next_state, reward, done, _ = env.step(action) # Step
         

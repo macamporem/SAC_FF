@@ -29,8 +29,6 @@ class SAC_fourier(object):
         except:
             self.TDfilter = 'none'
 
-        self.cutoffX = args.cutoffX
-        
         if args.Qapproximation == 'fourier':
             self.critic = Qfourier(num_inputs,
                 action_space.shape[0],
@@ -94,34 +92,34 @@ class SAC_fourier(object):
         reward_batch = torch.FloatTensor(reward_batch).to(self.device).unsqueeze(1)
         mask_batch = torch.FloatTensor(mask_batch).to(self.device).unsqueeze(1)
 
+        qf1, filterbw = self.critic(state_batch, action_batch) 
+
         with torch.no_grad():
-            next_state_action, next_state_log_pi, _, _ = self.policy.sample(next_state_batch)
+            next_state_action, next_state_log_pi, _, std = self.policy.sample(next_state_batch)
             
             if self.Qapproximation == 'byactiondim':
                 qf1_next_target = self.critic_target(next_state_batch, next_state_action)
-            if self.Qapproximation == 'fourier':
-                if self.TDfilter == 'none':
-                    qf1_next_target = self.critic_target(next_state_batch, next_state_action)
-                if self.TDfilter == 'rec_inside':
-                    with torch.no_grad():
-                        _, _, _, std = self.policy.sample(state_batch)
-                    qf1_next_target = self.critic_target(next_state_batch, next_state_action,
+            
+            if self.Qapproximation == 'fourier' and self.TDfilter == 'none':
+                qf1_next_target = self.critic_target(next_state_batch, next_state_action)
+                
+        if self.Qapproximation == 'fourier' and self.TDfilter == 'rec_inside':
+            # with torch.no_grad():
+            #     _, _, _, std = self.policy.sample(state_batch)
+            qf1_next_target, filterpower = self.critic_target(next_state_batch, next_state_action,
                                          std     = std, # detached
                                          logprob = None,
                                          mu      = None,
-                                         filter  = self.TDfilter, cutoffXX = self.cutoffX)
+                                         filter  = self.TDfilter, filterbw = filterbw)
 
-            min_qf_next_target = qf1_next_target - self.alpha * next_state_log_pi
-            next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
+        min_qf_next_target = qf1_next_target - self.alpha * next_state_log_pi
+        next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
         
-        qf1  = self.critic(state_batch, action_batch) # before
-#        qf1  = self.critic(state_batch, action_batch,
-#                           std     = std, # detached
-#                           logprob = None,
-#                           mu      = None,
-#                           filter  = self.TDfilter) # this is to learn bandwidth
-
-        qf1_loss = F.mse_loss(qf1, next_q_value)
+        # >>>> added filter regularization
+        qf1_loss = F.mse_loss(qf1, next_q_value) + 1*torch.mean(torch.pow(
+            torch.log(filterbw/(1-filterbw)) # (-inf,inf)
+            ,2))
+        # >>>> added filter regularization
 
         if self.Qapproximation == 'byactiondim':
             pi, log_pi, _, _ = self.policy.sample(state_batch)
@@ -132,16 +130,12 @@ class SAC_fourier(object):
 #                with torch.no_grad():
 #                    _, _, _, std = self.policy.sample(state_batch)
                 pi, log_pi, _, std = self.policy.sample(state_batch)
-                qf1_pi = self.critic(state_batch, pi,
-                                     std     = None,
-                                     logprob = None,
-                                     mu      = None,
-                                     filter  = 'none')
+                qf1_pi, _ = self.critic(state_batch, pi)
             if self.filter == 'rec_inside':
                 with torch.no_grad():
                     _, _, _, std = self.policy.sample(state_batch)
                 pi, log_pi, _, _ = self.policy.sample(state_batch)
-                qf1_pi = self.critic(state_batch, pi,
+                qf1_pi, _ = self.critic(state_batch, pi,
                                      std     = std, # detached
                                      logprob = None,
                                      mu      = None,
@@ -150,15 +144,11 @@ class SAC_fourier(object):
                 with torch.no_grad():
                     _, _, mu, std, log_pi_ = self.policy.sample_for_spectrogram(state_batch)
                 pi, log_pi, _, _, _ = self.policy.sample_for_spectrogram(state_batch)
-                qf1_pi = self.critic(state_batch, pi,
+                qf1_pi, _ = self.critic(state_batch, pi,
                                      std     = std, # detached
                                      logprob = log_pi_, # sum of logprobs w/o tanh correction
                                      mu      = mu,
                                      filter  = self.filter, cutoffXX = self.cutoffX)
-#                print(((std*torch.exp(log_pi_)).sum(1, keepdim=True)).shape,
-#                      std.mean(0),
-#                      ((std*torch.exp(log_pi_)).sum(1, keepdim=True)).mean(0),
-#                      torch.exp((log_pi).mean(0)))
 
         min_qf_pi = qf1_pi
 
@@ -184,14 +174,22 @@ class SAC_fourier(object):
         else:
             alpha_loss = torch.tensor(0.).to(self.device)
             alpha_tlogs = torch.tensor(self.alpha) # For TensorboardX logs
-
+            filterbw0_tlogs = torch.mean(torch.tensor(filterbw),0)[0] # For TensorboardX logs
+            filterbw1_tlogs = torch.mean(torch.tensor(filterbw),0)[1] # For TensorboardX logs
+            filterbw2_tlogs = torch.mean(torch.tensor(filterbw),0)[2] # For TensorboardX logs
+            filterpower_tlogs = torch.mean(filterpower) # For TensorboardX logs
+            filterpower_tlogs = torch.mean(filterpower) # For TensorboardX logs
+            min_qf_pi_tlogs = torch.mean(min_qf_pi) # For TensorboardX logs
 
         if updates % self.target_update_interval == 0:
             soft_update(self.critic_target, self.critic, self.tau)
 
 #        print('{:5.2f} {:5.2f} {:5.2f}'.format(std[:,0].std().item(),std[:,1].std().item(),std[:,2].std().item()))
         return qf1_loss.item(), 0, policy_loss.item(), alpha_loss.item(), alpha_tlogs.item(), \
-            std.mean().item()
+            std.mean().item(), \
+            filterbw0_tlogs.item(), filterbw1_tlogs.item(), filterbw2_tlogs.item(), \
+            filterpower_tlogs.item(), \
+            min_qf_pi_tlogs.item()
 
     # Save model parameters
     def save_model(self, env_name, suffix="", actor_path=None, critic_path=None):

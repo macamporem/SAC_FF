@@ -167,7 +167,9 @@ class Qfourier(nn.Module):
         self.linear2 = nn.Linear(hidden_dim, hidden_dim)
         self.linear3 = nn.Linear(hidden_dim, 1)
         
-#        self.filterbw_0p1 = nn.Linear(num_inputs, 3) # torch.sigmoid(nn.Parameter(torch.tensor(1.)))
+        self.filterbw = nn.Linear(num_inputs, 3) 
+        # self.coeff1 = nn.Linear(num_inputs, 3) 
+        # self.coeff2 = nn.Linear(num_inputs, 3) 
 
         self.apply(weights_init_)
         self.gsize = gridsize
@@ -184,12 +186,19 @@ class Qfourier(nn.Module):
                 
         self.integration_grid = [round(i*2*.75/4-.75,2) for i in range(4+1)] # ..0001
 #        self.integration_grid = [round(i*2*1.95/10-1.95,2) for i in range(10+1)] # ..0002
-#        self.integration_grid = [round(i*2*.75/2-.75,2) for i in range(2+1)] # ..0003
+
+        self.len_integration_grid = len(self.integration_grid)
+        self.semilen_integration_grid = int((self.len_integration_grid-1)/2)
+
+        self.filtercoeff = np.sin(np.pi*np.array(self.integration_grid))/(np.pi*np.array(self.integration_grid))
+        self.filtercoeff[self.semilen_integration_grid] = 1
         print('\nintegration grid')
         print(self.integration_grid)
+        print(self.filtercoeff)
 
-
-    def forward(self, state, action, std = None, logprob = None, mu = None, filter = 'none', cutoffXX = 2):
+    def forward(self, state, action, 
+        std = None, logprob = None, mu = None, filter = 'none', 
+        filterbw = None): #, coeff1 = None, coeff2 = None):
 
         if filter == 'none':
             xu = torch.cat([state, action], 1)
@@ -197,7 +206,9 @@ class Qfourier(nn.Module):
             x1 = F.relu(self.linear1(xu))
             x1 = F.relu(self.linear2(x1))
             x1 = self.linear3(x1)
-            return x1
+            return x1, torch.sigmoid(self.filterbw(state)) # , \
+            # torch.sigmoid(self.coeff1(state)) \,
+            # torch.sigmoid(self.coeff2(state))
 
         if filter == 'rec_outside':
             
@@ -230,22 +241,24 @@ class Qfourier(nn.Module):
 
         if filter == 'rec_inside':
 
-            action_m1p1 = (action - self.action_bias) / self.action_scale
+            # action = tanh(sampled_action) * self.action_scale + self.action_bias
+            # action_m1p1 = tanh(sampled_action) 
+            # sampled_action = tanhinverse(action_m1p1)
+
+            action_m1p1 = (action - self.action_bias) / self.action_scale # (-1,1)
+            action_m1p1 = 0.001 + (1+action_m1p1)*.499 # (0.001,0.999)
+            action_m1p1_isigmoid = torch.log(action_m1p1/(1-action_m1p1)) # (-inf,inf)
 
             # initialize Q value = 0
             tempQvalue = torch.zeros((state.shape[0],1))
             filterpower = torch.zeros((state.shape[0],1))
             Qpower = torch.zeros((state.shape[0],1))
 
-            cutoffW = cutoffXX * (1 / (F.relu(std) + 0.1)) # ..0001 and ..0002
-#            bw = torch.sigmoid(self.filterbw_0p1(state)) # ..0010
-#            cutoffW = bw * 3 * (1 / (F.relu(std) + 0.1)) # ..0010 and ..0011
+            cutoffW = 1 + 100*filterbw # radians
             delta_a = 3.14 / cutoffW # first zero of sincWx/pix
-            
-            # cutoffW = 1 ... [-0.1,0,0.1] ... main.py --Qapproximation fourier --num_steps 100000 --TDfilter rec_inside --alpha 0.05 ~ 1100
-            
+                        
 #            dVolume = 1/(len(integration_grid)**3)
-            dVolume = 1/(len(self.integration_grid)*3)
+            dVolume = 1/((self.len_integration_grid)*3)
 
 #            for i0 in integration_grid:
 #                for i1 in integration_grid:
@@ -253,46 +266,53 @@ class Qfourier(nn.Module):
             idic = {0:[1,0,0],
                     1:[0,1,0],
                     2:[0,0,1]}
+
             for actionid in [0,1,2]:
 
-                for i_ in self.integration_grid:
-                        i0 = i_*idic[actionid][0]
-                        i1 = i_*idic[actionid][1]
-                        i2 = i_*idic[actionid][2]
+                for i_idx in range(self.len_integration_grid):
+                        i_ = self.integration_grid[i_idx]
+                        i0 = i_*idic[actionid][0] # -0.75, -0.38, 0, 0.38, 0.75
+                        i1 = i_*idic[actionid][1] 
+                        i2 = i_*idic[actionid][2] 
+                        i0_filter_idx = self.semilen_integration_grid + (i_idx-self.semilen_integration_grid)*idic[actionid][0] # 2 + [-2, -1, 0, 1, 2]
+                        i1_filter_idx = self.semilen_integration_grid + (i_idx-self.semilen_integration_grid)*idic[actionid][1]
+                        i2_filter_idx = self.semilen_integration_grid + (i_idx-self.semilen_integration_grid)*idic[actionid][2]
 
                         # new point in the grid
                         action_m1p1_grid = torch.zeros(action_m1p1.shape)
-                        action_m1p1_grid[:,0] = torch.tanh(action_m1p1[:,0] + i0 * delta_a[:,0])
-                        action_m1p1_grid[:,1] = torch.tanh(action_m1p1[:,1] + i1 * delta_a[:,1])
-                        action_m1p1_grid[:,2] = torch.tanh(action_m1p1[:,2] + i2 * delta_a[:,2])
+                        action_m1p1_grid[:,0] = torch.sigmoid(action_m1p1_isigmoid[:,0] + i0 * delta_a[:,0]) # (0,1)
+                        action_m1p1_grid[:,1] = torch.sigmoid(action_m1p1_isigmoid[:,1] + i1 * delta_a[:,1])
+                        action_m1p1_grid[:,2] = torch.sigmoid(action_m1p1_isigmoid[:,2] + i2 * delta_a[:,2])
+
+                        action_m1p1_grid = 1.999*(action_m1p1_grid - 0.5) # (-1,1)
+                        action_m1p1_grid = action_m1p1_grid * self.action_scale + self.action_bias # (-min, max)
 
                         # argument of sin function
-                        WxA = cutoffW * (action_m1p1_grid - action_m1p1) + 0.001 # = -1.5*pi, 0, +1.5*pi
+                        # WxA = cutoffW * (action_m1p1_grid - action_m1p1) + 0.001 # = -1.5*pi, 0, +1.5*pi
+                        
                         # denominator sinc function if we wanted the filter to be H=1 in frequency domain
-                        piA = 3.14 * (action_m1p1_grid - action_m1p1) + 0.001
+                        # piA = 3.14 * (action_m1p1_grid - action_m1p1) + 0.001
                         
                         filter = (
-                                  (torch.sin(WxA[:,0])/WxA[:,0]).view(-1,1) * \
-                                  (torch.sin(WxA[:,1])/WxA[:,1]).view(-1,1) * \
-                                  (torch.sin(WxA[:,2])/WxA[:,2]).view(-1,1)
+                                  self.filtercoeff[i0_filter_idx] * \
+                                  self.filtercoeff[i1_filter_idx] * \
+                                  self.filtercoeff[i2_filter_idx]
                                   )
-                                  
-#                        tempQvalue += self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
-#                                (self.action_bias + action_m1p1_grid*self.action_scale)], 1)))))) * \
-#                                filter * dVolume
+                        # filter = (
+                        #           (torch.sin(WxA[:,0])/WxA[:,0]).view(-1,1) * \
+                        #           (torch.sin(WxA[:,1])/WxA[:,1]).view(-1,1) * \
+                        #           (torch.sin(WxA[:,2])/WxA[:,2]).view(-1,1)
+                        #           )
 
                         Q            = self.linear3(F.relu(self.linear2(F.relu(self.linear1(torch.cat([state,
                                         (self.action_bias + action_m1p1_grid*self.action_scale)], 1))))))
 
-                        tempQvalue  += ( Q * filter ) * dVolume
-#                        Qpower      += np.power(Q,2) * dVolume
-                        filterpower += filter * dVolume # np.power(filter,2) * dVolume
+                        tempQvalue  += ( Q * filter ) # * dVolume
+                        filterpower += filter # * dVolume 
 
-#            filterpower = np.power(filterpower,1/2)
-#            Qpower      = np.power(Qpower,1/2)
             tempQvalue  = tempQvalue / filterpower
             
-            return tempQvalue
+            return tempQvalue, filterpower/(3*self.len_integration_grid)
 
 
     def spectrum(self, state, action, std_batch, prob_batch, action_space = None, To = 2, modes = 10):

@@ -94,6 +94,10 @@ hard_update(agent.critic_target, agent.critic)
 writer = SummaryWriter(logdir='./runs/{}_SAC_eval_{}_{}_{}'.format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), args.env_name,
                                                              args.policy, "autotune" if args.automatic_entropy_tuning else ""))
 
+# normalization constants
+action_scale = ((env.action_space.high - env.action_space.low) / 2.)
+action_bias = ((env.action_space.high + env.action_space.low) / 2.)
+
 # Training Loop
 total_numsteps = 0
 updates = 0
@@ -135,14 +139,22 @@ for i_episode in range(5):
                 action_history.append(action)
 
                 if args.noise == 'awgn':
-                    action_w_noise = action
+                    action_w_noise = (action - action_bias) / action_scale # (-1,1)
+                    action_w_noise = 0.001 + (1+action_w_noise)*.499 # (0.001,0.999)
+                    action_w_noise_isigmoid = np.log(action_w_noise/(1-action_w_noise)) # (-inf,inf)
                     for aidx in range(env.action_space.shape[0]):
-                        action_w_noise[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                        if action[aidx] == np.nan:
+                            action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*0)]
+                        else:
+                            action_w_noise_isigmoid[aidx] += awgn_baseline[aidx]*awgn[aidx][int(100+100*action[aidx])]
+                    action_w_noise = sigmoid(action_w_noise_isigmoid) # (0,1)
+                    action_w_noise = 1.999*(action_w_noise - 0.5) # (-1,1)
+                    action_w_noise = action_w_noise * action_scale + action_bias
                     next_state, reward, done, _ = env.step(action_w_noise) # Step
                 else:
                     next_state, reward, done, _ = env.step(action) # Step
                 action_history_w_noise.append(action)
-#                adaptivebw.append(torch.sigmoid(agent.critic.filterbw_0p1(torch.tensor(state))).detach().numpy())
+                adaptivebw.append(torch.sigmoid(agent.critic.filterbw(torch.tensor(state))).detach().numpy())
 
                 episode_reward += reward
 
@@ -165,9 +177,9 @@ for i_episode in range(5):
             np.std(np.array(action_history),0)[1],
             np.mean(np.array(action_history),0)[2],
             np.std(np.array(action_history),0)[2],
-            0, #np.mean(np.array(adaptivebw),0)[0],
-            0, #np.mean(np.array(adaptivebw),0)[1],
-            0, #np.mean(np.array(adaptivebw),0)[2],
+            np.mean(np.array(adaptivebw),0)[0],
+            np.mean(np.array(adaptivebw),0)[1],
+            np.mean(np.array(adaptivebw),0)[2],
             ))
         print("------------------------------------------------------------------------------------------------------------------------")
 
